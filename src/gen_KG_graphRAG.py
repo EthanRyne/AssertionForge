@@ -320,7 +320,7 @@ def create_directory_structure(base_dir):
 
 
 def initialize_graphrag(graph_rag_dir):
-    command = f"export PYTHONPATH='{FLAGS.graphrag_local_dir}' && python -m graphrag.index --init --root {graph_rag_dir}"
+    command = f"graphrag init --root {graph_rag_dir}"
     print(command)
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
 
@@ -354,7 +354,7 @@ def copy_entity_extraction_prompt(graph_rag_dir):
 
 
 def run_graphrag_index(graph_rag_dir):
-    command = f"export PYTHONPATH='{FLAGS.graphrag_local_dir}:$PYTHONPATH' && python -m graphrag.index --root {graph_rag_dir}"
+    command = f"graphrag index --root {graph_rag_dir}"
     print(command)
     process = subprocess.Popen(
         command,
