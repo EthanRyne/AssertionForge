@@ -6,98 +6,87 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+# utils_LLM.py
 from __future__ import annotations
-from typing import Any, Dict, Optional, Callable
 import os, time, json, re
+from typing import Any, Callable, Dict, Optional
 
-# Optional fast tokenizer for OpenAI models
 try:
-    import tiktoken
+    import tiktoken  # type: ignore
 except Exception:
-    tiktoken = None  # it's okay if this is missing
+    tiktoken = None  # optional
 
-# Use the repo's saver logger if available
 try:
     from saver import saver
     log = saver.log_info
 except Exception:
-    log = print
+    def log(msg: str):  # fallback logger
+        print(msg)
+
 
 # =========================
 # Public API
 # =========================
 
-def get_llm(model_name: str, **llm_args) -> Any:
-    name = (model_name or "").lower()
+def get_llm(model_name: str, llm_engine_type: Optional[str] = None, **llm_args) -> Any:
+    """
+    Returns an llm_agent handle that llm_inference(...) can use.
 
-    if name == "callable":
-        fn = llm_args.get("fn")
+    Accepts:
+      - provider names: "openai", "anthropic", "http"
+      - model ids (esp. OpenRouter style like "x-ai/grok-4-fast:free")
+        -> treated as OpenAI-compatible via OpenRouter unless overridden.
+
+    Common llm_args:
+      - client          : prebuilt client (OpenAI or Anthropic). If omitted, we create one.
+      - base_url        : override base URL (defaults to OpenRouter if model id includes "/" or ":")
+      - api_key_env     : env var name to fetch API key from (default OPENAI_API_KEY or OPENROUTER_API_KEY heuristic)
+      - model           : optional explicit model override (defaults to model_name)
+      - headers         : dict of extra headers (for OpenRouter Referer/Title)
+      - system, temperature, max_tokens, stop : standard gen args (optional)
+    """
+    name = (model_name or "").strip().lower()
+    model_id = llm_args.get("model") or model_name
+
+    # If caller passed a ready-made callable, return it
+    fn = llm_args.get("fn")
+    if llm_engine_type == "callable" or callable(fn):
         if not callable(fn):
             raise TypeError("get_llm('callable') requires fn=<callable>.")
         return fn
 
-    agent = {
-        "provider": None,
-        "model": llm_args.get("model"),
-        "system": llm_args.get("system", "You are a hardware verification expert."),
-        "temperature": float(llm_args.get("temperature", 0.0)),
-        "max_tokens": int(llm_args.get("max_tokens", 1024)),
-        "stop": llm_args.get("stop"),
-        "metadata": llm_args.get("metadata", {}),
-    }
+    # Provider explicitly requested
+    provider = (llm_engine_type or "").strip().lower()
+    if provider in {"openai", "anthropic", "http"}:
+        return _make_agent(provider=provider, model=model_id, **llm_args)
 
-    if name == "openai":
-        client = llm_args.get("client")
-        if client is None:
-            try:
-                from openai import OpenAI  # type: ignore
-                client = OpenAI(
-                          api_key='',
-                          base_url="https://openrouter.ai/api/v1")
-            except Exception as e:
-                raise RuntimeError("OpenAI client not provided and auto-import failed.") from e
-        agent.update({"provider": "openai", "client": client})
-        return agent
+    # Otherwise infer:
+    # - If name matches a known provider, use it
+    if name in {"openai", "anthropic", "http", "rest", "vllm", "tgi"}:
+        mapped = "http" if name in {"http", "rest", "vllm", "tgi"} else name
+        return _make_agent(provider=mapped, model=model_id, **llm_args)
 
-    if name == "anthropic":
-        client = llm_args.get("client")
-        if client is None:
-            try:
-                import anthropic  # type: ignore
-                client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            except Exception as e:
-                raise RuntimeError("Anthropic client not provided and auto-import failed.") from e
-        agent.update({"provider": "anthropic", "client": client})
-        return agent
+    # - If it *looks* like an OpenRouter model id ("vendor/model" or ":tag"), route to OpenAI-compatible client @ OpenRouter
+    if "/" in model_name or ":" in model_name:
+        return _make_agent(provider="openai", model=model_id, default_to_openrouter=True, **llm_args)
 
-    if name in ("http", "rest", "vllm", "tgi"):
-        base_url = llm_args.get("base_url")
-        if not base_url:
-            raise ValueError("get_llm('http') requires base_url=...")
-        agent.update({
-            "provider": "http",
-            "base_url": base_url,
-            "headers": llm_args.get("headers", {"Content-Type": "application/json"})
-        })
-        return agent
-
-    # Heuristic: allow passing client+model without naming provider
-    if llm_args.get("client") and agent["model"]:
-        agent.update({"provider": "openai", "client": llm_args["client"]})
-        return agent
-
-    raise ValueError(f"Unsupported model/provider name: {model_name!r}")
+    # - Fallback: assume OpenAI-compatible local/OpenAI
+    return _make_agent(provider="openai", model=model_id, **llm_args)
 
 
 def llm_inference(llm_agent: Any, prompt: str, tag: str) -> str:
+    """
+    Execute a single-turn chat-style request and return the text.
+    llm_agent can be:
+      - a callable: fn(prompt, tag) -> str
+      - a dict from get_llm()
+    """
     if llm_agent is None:
         raise ValueError("llm_inference: llm_agent is None")
 
-    # Callable agent
     if callable(llm_agent):
         return _ensure_text(llm_agent(prompt, tag))
 
-    # Dict agent (from get_llm)
     if isinstance(llm_agent, dict) and "provider" in llm_agent:
         prov = llm_agent["provider"]
         if prov == "openai":
@@ -112,83 +101,118 @@ def llm_inference(llm_agent: Any, prompt: str, tag: str) -> str:
 
 def count_prompt_tokens(text: str, model_name: Optional[str] = None) -> int:
     """
-    Count approximate tokens for a prompt string.
-
-    - If tiktoken is installed and model_name is a known OpenAI model,
-      uses the exact tokenizer for that model/family.
-    - Otherwise falls back to:
-        1) 1 token ≈ 4 characters heuristic
-        2) whitespace token count as a lower bound
-
-    Args:
-        text: prompt string
-        model_name: optional (e.g., "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"). If omitted, uses a general tokenizer if available.
-
-    Returns:
-        int: estimated/actual token count
+    Token count with best-effort accuracy.
+    Uses tiktoken if present (encoding_for_model or cl100k_base fallback), else heuristics.
     """
-    s = text if text is not None else ""
-    s = s.strip()
+    s = (text or "").strip()
     if not s:
         return 0
 
-    # Prefer tiktoken if available
     if tiktoken is not None:
         enc = _get_tiktoken_encoding(model_name)
         if enc is not None:
             try:
                 return len(enc.encode(s))
             except Exception:
-                pass  # fall through to heuristics
+                pass
 
-    # Heuristic 1: 1 token ~ 4 chars (English-ish average)
-    approx = max(1, int(round(len(s) / 4.0)))
-
-    # Heuristic 2: whitespace token count as a floor
-    ws_tokens = max(1, len(re.findall(r"\S+", s)))
-
-    # Take the max to be conservative (avoid underestimation)
+    # Heuristics: conservative (take max)
+    approx = max(1, int(round(len(s) / 4.0)))           # ~4 chars per token
+    ws_tokens = max(1, len(re.findall(r"\S+", s)))      # whitespace split
     return max(approx, ws_tokens)
 
+
 # =========================
-# Provider implementations
+# Provider builders
+# =========================
+
+def _make_agent(*, provider: str, model: str, default_to_openrouter: bool = False, **kw) -> Dict[str, Any]:
+    agent: Dict[str, Any] = {
+        "provider": provider,
+        "model": model
+    }
+
+    if provider == "openai":
+        client = kw.get("client")
+        base_url = kw.get("base_url")
+        headers = kw.get("headers") or kw.get("extra_headers") or {}
+        api_key = kw.get("api_key")
+
+        if default_to_openrouter and not base_url:
+            base_url = "https://openrouter.ai/api/v1"
+            # Prefer explicit OpenRouter env var; fallback to OPENAI_API_KEY if user set that intentionally
+            api_key_env = api_key_env or ("OPENROUTER_API_KEY" if os.getenv("OPENROUTER_API_KEY") else "OPENAI_API_KEY")
+            # OK if missing; the OpenAI client will error clearly if no key is present
+
+        if client is None:
+            try:
+                from openai import OpenAI  # type: ignore
+                # key = os.getenv(api_key_env) if api_key_env else os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+                if not api_key:
+                    raise RuntimeError("No API key found: set OPENROUTER_API_KEY or OPENAI_API_KEY.")
+                client = OpenAI(api_key=api_key, base_url=base_url, default_headers=headers or None)
+            except Exception as e:
+                raise RuntimeError("OpenAI client not provided and auto-import failed.") from e
+
+        agent.update({"client": client})
+        return agent
+
+    if provider == "anthropic":
+        client = kw.get("client")
+        if client is None:
+            try:
+                import anthropic  # type: ignore
+                key = os.getenv(kw.get("api_key_env") or "ANTHROPIC_API_KEY")
+                if not key:
+                    raise RuntimeError("No API key found: set ANTHROPIC_API_KEY.")
+                client = anthropic.Anthropic(api_key=key)
+            except Exception as e:
+                raise RuntimeError("Anthropic client not provided and auto-import failed.") from e
+        agent.update({"client": client})
+        return agent
+
+    if provider == "http":
+        base_url = kw.get("base_url")
+        if not base_url:
+            raise ValueError("get_llm('http') requires base_url=...")
+        headers = kw.get("headers", {"Content-Type": "application/json"})
+        agent.update({
+            "base_url": base_url,
+            "headers": headers
+        })
+        return agent
+
+    raise ValueError(f"Unsupported provider: {provider!r}")
+
+
+# =========================
+# Provider calls
 # =========================
 
 def _call_openai(agent: Dict[str, Any], prompt: str, tag: str) -> str:
     client = agent["client"]
     model = agent["model"]
-    system = agent.get("system", "You are a helpful assistant.")
-    temperature = agent.get("temperature", 0.0)
-    max_tokens = agent.get("max_tokens", 1024)
-    stop = agent.get("stop")
-    meta = agent.get("metadata", {})
 
+    def do_chat():
+        return client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+        )
+
+    # Try chat.completions (OpenAI v1)
     if hasattr(client, "chat") and hasattr(client.chat, "completions"):
-        return _retry(lambda: _extract_text_openai(
-            client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"{system} (tag={tag})"},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop=stop,
-            )
-        ), f"openai.chat:{model}")
+        return _retry(lambda: _extract_text_openai(do_chat()), f"openai.chat:{model}")
 
+    # Try responses API
     if hasattr(client, "responses"):
-        return _retry(lambda: _extract_text_openai(
-            client.responses.create(
+        def do_resp():
+            return client.responses.create(
                 model=model,
                 input=prompt,
-                metadata={**meta, "tag": tag},
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-                stop_sequences=stop,
-                system=system,
             )
-        ), f"openai.responses:{model}")
+        return _retry(lambda: _extract_text_openai(do_resp()), f"openai.responses:{model}")
 
     raise RuntimeError("OpenAI client has no known methods (chat.completions/responses).")
 
@@ -246,13 +270,10 @@ def _call_http(agent: Dict[str, Any], prompt: str, tag: str) -> str:
         req = urllib.request.Request(base_url, data=data, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=60) as resp:
             obj = json.loads(resp.read().decode("utf-8"))
-
-        # OpenAI chat-compatible
         try:
             return obj["choices"][0]["message"]["content"]
         except Exception:
             pass
-        # Text completions
         try:
             return obj["choices"][0]["text"]
         except Exception:
@@ -260,6 +281,7 @@ def _call_http(agent: Dict[str, Any], prompt: str, tag: str) -> str:
         return str(obj)
 
     return _retry(do, f"http:{base_url}")
+
 
 # =========================
 # Helpers
@@ -287,7 +309,7 @@ def _ensure_text(x: Any) -> str:
     # OpenAI responses
     try: return x.output_text  # type: ignore[attr-defined]
     except Exception: pass
-    # Anthropic messages
+    # Anthropic messages format
     try:
         parts = []
         for block in getattr(x, "content", []) or []:
@@ -299,9 +321,9 @@ def _ensure_text(x: Any) -> str:
     return str(x)
 
 def _extract_text_openai(resp: Any) -> str:
-    try: return resp.choices[0].message.content  # chat.completions
+    try: return resp.choices[0].message.content
     except Exception: pass
-    try: return resp.output_text  # responses API
+    try: return resp.output_text
     except Exception: pass
     return _ensure_text(resp)
 
@@ -317,9 +339,7 @@ def _get_tiktoken_encoding(model_name: Optional[str]):
         return None
     try:
         if model_name:
-            # Known model → pick matching encoding if available
             return tiktoken.encoding_for_model(model_name)
-        # Generic fallback (gpt-4o family is usually cl100k_base compatible)
         return tiktoken.get_encoding("cl100k_base")
     except Exception:
         try:
