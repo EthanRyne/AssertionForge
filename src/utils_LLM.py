@@ -52,7 +52,7 @@ def get_llm(model_name: str, **llm_args) -> Any:
             try:
                 from openai import OpenAI  # type: ignore
                 client = OpenAI(
-                          api_key='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',
+                          api_key='',
                           base_url="https://openrouter.ai/api/v1")
             except Exception as e:
                 raise RuntimeError("OpenAI client not provided and auto-import failed.") from e
