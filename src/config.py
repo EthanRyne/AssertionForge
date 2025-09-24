@@ -74,11 +74,11 @@ if task == 'gen_plan':
 
         elif design_name == 'uart':
 
-            file_path = '/<path>/<to>/AssertLLM/spec/uart.pdf'
+            file_path = '/content/AssertLLM/spec/uart.pdf'
             design_dir = (
-                '/<path>/<to>/AssertLLM/rtl/uart'
+                '/content/AssertLLM/rtl/uart'
             )
-            KG_path = '/<path>/<to>/AssertLLM/spec/graph_rag_uart/output/20240917-111426/artifacts/clustered_graph.0.graphml'
+            KG_path = '/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml'
 
             # KG_path = '/<path>/<to>/AssertLLM/spec/graph_rag_uart/output/20240920-163242/artifacts/clustered_graph.graphml'  # vanilla/baseline
 
@@ -103,10 +103,9 @@ if task == 'gen_plan':
         # llm_model = 'gpt-35-turbo'
         # llm_model = 'gpt-4'
         # llm_model = 'gpt-4-turbo'
-        llm_model = 'gpt-4o'
+        llm_model = 'x-ai/grok-4-fast:free'
 
-        llm_args = {}
-
+        llm_args = {'base_url':'https://openrouter.ai/api/v1','api_key':''}
 
         max_tokens_per_prompt = 8000
 
@@ -263,8 +262,8 @@ elif task == 'build_KG':
     # design_name = 'ethmac'
     # design_name = 'openMSP430'
     # design_name = 'tiny_pairing'
-    # design_name = 'uart'
-    design_name = 'sockit'
+    design_name = 'uart'
+    # design_name = 'sockit'
 
     if design_name == 'apb':
 
@@ -288,7 +287,7 @@ elif task == 'build_KG':
 
     elif design_name == 'uart':
         input_file_path = (
-            '/<path>/<to>/AssertLLM/spec/uart.pdf'
+            '/content/AssertLLM/spec/uart.pdf'
         )
     elif design_name == 'sockit':
         input_file_path = (
@@ -298,14 +297,14 @@ elif task == 'build_KG':
     else:
         assert False
 
-    env_source_path = '/<path>/<to>/rag_apb/.env'
+    env_source_path = '/content/.env'
 
     settings_source_path = (
-        '/<path>/<to>/rag_apb/settings.yaml'
+        '/content/settings.yaml'
     )
 
     # entity_extraction_prompt_source_path = '/<path>/<to>/rag_apb/prompts/entity_extraction_vanilla_graphRAG.txt'  # original/baseline
-    entity_extraction_prompt_source_path = f'/<path>/<to>/rag_apb/prompts/entity_extraction.txt'  # better- customized for HW
+    entity_extraction_prompt_source_path = f'/content/AssertionForge/entity_extraction.txt'  # better- customized for HW
 
 elif task == 'use_KG':
     KG_root = f'/<path>/<to>/data/apb/graph_rag/output/20240813-163015/artifacts'
@@ -325,7 +324,7 @@ hostname = get_host()
 
 # Define the root path (adjust this if necessary)
 ROOT = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[1]
 )  # Adjust this number based on actual .git location
 
 try:
