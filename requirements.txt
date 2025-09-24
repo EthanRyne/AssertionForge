@@ -104,6 +104,7 @@ fsspec==2024.5.0
 future==1.0.0
 gensim==4.3.2
 git-filter-repo==2.47.0
+graphrag==2.6.0
 graphviz==0.20.3
 graspologic==3.4.1
 graspologic-native==1.2.1
@@ -196,7 +197,7 @@ nltk==3.9.1
 notebook_shim==0.2.4
 numba==0.60.0
 oauthlib==3.2.2
-ollama==0.2.1
+ollama==0.5.4
 onnxruntime==1.16.3
 openai
 opencv-python-headless==4.10.0.84
