@@ -1,6 +1,3 @@
-%%writefile /content/AssertionForge/src/load_result.py
-
-# load_result.py
 from __future__ import annotations
 import os
 import re
