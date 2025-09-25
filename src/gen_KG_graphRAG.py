@@ -157,7 +157,7 @@ def detect_graphrag_log_folder(graph_rag_dir):
     before_folders = set(os.listdir(output_dir))
 
     # Run GraphRAG indexing
-    run_graphrag_index(graph_rag_dir)
+    # run_graphrag_index(graph_rag_dir)
 
     after_folders = set(os.listdir(output_dir))
     new_folders = after_folders - before_folders
