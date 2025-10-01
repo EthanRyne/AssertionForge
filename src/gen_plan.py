@@ -24,6 +24,8 @@ from config import FLAGS
 from saver import saver
 from utils import OurTimer
 from utils_LLM import get_llm, llm_inference
+from pyverilog.vparser.parser import parse
+from pyverilog.vparser.ast import ModuleDef, Ioport, InstanceList
 import networkx as nx
 from typing import Tuple, List, Dict, Optional, Set, Union
 from PyPDF2 import PdfReader
@@ -922,56 +924,39 @@ def parse_nl_plans(result: str) -> Dict[str, List[str]]:
     return nl_plans
 
 
-def write_svas_to_file(svas: List[str]) -> Tuple[List[str], Set[str]]:
+def write_svas_to_file(svas: List[str], design_dir: str, out_dir: str="./_out") -> Tuple[List[str], Set[str]]:
     """
-    Write each generated SVA to a separate file, preserving the module interface from the original file.
+    Main orchestration function for the SVA pipeline.
+    - If no SVAs are provided, return the valid signal names only.
+    - If SVAs are provided, generate a checker module and bind file.
 
     Args:
-        svas (List[str]): List of generated SVAs.
+        svas (List[str]): List of assertion properties (strings).
+        design_dir (str): Path to the directory containing design/SVA files.
+        out_dir (str): Output directory for generated files. Defaults to "./_out".
 
     Returns:
-        Tuple[List[str], Set[str]]: List of paths to the generated SVA files and set of valid signal names.
+        Tuple[List[str], Set[str]]: List of paths to generated SVA files,
+                                    and a set of valid signal names from the design.
     """
-    original_sva_path = os.path.join(FLAGS.design_dir, "property_goldmine.sva")
+    module_interface, valid_signals = None, set()
+    chosen_top = None
+    out_dir = FLAG.sva_out_dir or FLAGS.design_dir
 
-    # Extract the module interface from the original file
-    with open(original_sva_path, "r") as f:
-        original_content = f.read()
+    # Step 1: Try to find an existing property_goldmine.sva
+    module_interface, valid_signals = find_existing_sva(FLAGS.design_dir)
+    if not module_interface:
+        print("Finding existing SVAs to write to")
+        module_interface, valid_signals, chosen_top = extract_signals_from_rtl(FLAGS.design_dir)
+    else:
+        chosen_top = re.search(r'module\s+(\w+)', module_interface).group(1)
 
-    # Use regex to find the module declaration
-    module_match = re.search(
-        r'module\s+(\w+)\s*\((.*?)\);', original_content, re.DOTALL
-    )
-    if not module_match:
-        raise ValueError("Could not find module declaration in the original SVA file.")
-
-    module_name = module_match.group(1)
-    module_interface = f"module {module_name}({module_match.group(2)});"
-
-    # Extract valid signal names
-    valid_signals = extract_signal_names(module_interface)
-
-    sva_file_paths = []
-    for i, sva in enumerate(svas):
-        sva_file_content = f"{module_interface}\n\n"
-
-        # Format the SVA as a property
-        property_name = f"a{i}"
-        sva_file_content += f"property {property_name};\n"
-        sva_file_content += f"{sva}\n"
-        sva_file_content += f"endproperty\n"
-        sva_file_content += (
-            f"assert_{property_name}: assert property({property_name});\n\n"
-        )
-        sva_file_content += "endmodule\n"
-
-        sva_file_path = os.path.join(saver.logdir, "tbs", f"property_goldmine_{i}.sva")
-        os.makedirs(os.path.dirname(sva_file_path), exist_ok=True)
-        with open(sva_file_path, "w") as f:
-            f.write(sva_file_content)
-        sva_file_paths.append(sva_file_path)
-
-    return sva_file_paths, valid_signals
+    # Step 2: Behavior depending on input
+    if not svas:   # no SVAs → return only signals
+        return [], valid_signals
+    else:          # SVAs exist → generate checker+bind
+        file_path = generate_checker_and_bind(svas, module_interface, valid_signals, chosen_top, out_dir)
+        return [file_path], valid_signals
 
 
 def generate_tcl_scripts(sva_file_paths: List[str]) -> List[str]:
@@ -1406,6 +1391,167 @@ def extract_short_error_message(full_error: str) -> str:
         return parts[-1].strip()
     return full_error
 
+def find_existing_sva(design_dir: str) -> Tuple[str, Set[str]]:
+    """
+    Look for an existing property_goldmine.sva file in the design directory.
+
+    Args:
+        design_dir (str): Path to the directory containing design and SVA files.
+
+    Returns:
+        Tuple[str, Set[str]]: The reconstructed module interface string and a set of valid signal names.
+                             If no file is found, returns (None, empty set).
+    """
+    sva_path = FLAGS.sva_file_path or os.path.join(design_dir, "property_goldmine.sva")
+    if not os.path.exists(sva_path):
+        return None, set()
+    with open(sva_path, "r") as f:
+        content = f.read()
+
+    module_match = re.search(r'module\s+(\w+)\s*\((.*?)\);', content, re.DOTALL)
+    if not module_match:
+        raise ValueError("Could not find module declaration in property_goldmine.sva")
+
+    module_name = module_match.group(1)
+    module_interface = f"module {module_name}({module_match.group(2)});"
+    valid_signals = extract_signal_names(content)
+    return module_interface, valid_signals
+
+
+def extract_signals_from_rtl(design_dir: str) -> Tuple[str, Set[str], str]:
+    """
+    Parse RTL files using PyVerilog to extract the top module and its ports.
+
+    Args:
+        design_dir (str): Path to the directory containing RTL files.
+
+    Returns:
+        Tuple[str, Set[str], str]: The reconstructed module interface string,
+                                   a set of valid signal names, and the detected top module name.
+    """
+    rtl_files = []
+    for pat in ["*.v", "*.sv", "*.vh", "*.svh"]:
+        rtl_files.extend(glob.glob(os.path.join(design_dir, pat)))
+    if not rtl_files:
+        raise FileNotFoundError(f"No RTL files found in {design_dir}")
+
+    ast, _ = parse(rtl_files)
+    module_defs, instantiated = {}, set()
+
+    def _walk(node):
+        if isinstance(node, ModuleDef):
+            module_defs[node.name] = node
+            for item in node.items or []:
+                if isinstance(item, InstanceList) and hasattr(item, "module"):
+                    instantiated.add(item.module)
+        for c in getattr(node, "children", lambda: [])():
+            _walk(c)
+    _walk(ast)
+
+    if not module_defs:
+        raise RuntimeError("No module definitions found in RTL.")
+
+    candidates = set(module_defs.keys()) - instantiated
+    chosen_top = sorted(candidates)[0] if candidates else sorted(module_defs.keys())[0]
+    top_def = module_defs[chosen_top]
+
+    port_names, port_decl_lines = [], []
+
+    def _fmt_width(width):
+        if width is None:
+            return ""
+        try:
+            msb = getattr(width.msb, "value", None) or getattr(width.msb, "name", None) or str(width.msb)
+            lsb = getattr(width.lsb, "value", None) or getattr(width.lsb, "name", None) or str(width.lsb)
+            return f"[{msb}:{lsb}]"
+        except Exception:
+            return ""
+
+    def _decl_from_io(io):
+        dir_node = io.first
+        direction = dir_node.__class__.__name__.lower()
+        width = _fmt_width(getattr(dir_node, "width", None))
+        dtype = "logic"
+        name = getattr(io, "second", None) or getattr(dir_node, "name", None)
+        if hasattr(name, "name"):
+            name = name.name
+        elif not isinstance(name, str):
+            name = str(name)
+        width_sp = (width + " ") if width else ""
+        return direction, name, f"{direction} {dtype} {width_sp}{name}"
+
+    if top_def.portlist:
+        for item in top_def.portlist.ports:
+            if isinstance(item, Ioport):
+                _, pname, decl = _decl_from_io(item)
+                port_names.append(pname)
+                port_decl_lines.append(decl + ";")
+            else:
+                pname = getattr(item, "name", None)
+                if hasattr(pname, "name"):
+                    pname = pname.name
+                if not isinstance(pname, str):
+                    pname = str(pname)
+                port_names.append(pname)
+                port_decl_lines.append(f"input logic {pname}; // direction unknown")
+
+    valid_signals = set(port_names)
+    module_interface = f"module {chosen_top}({', '.join(port_names)});"
+    return module_interface, valid_signals, chosen_top
+
+
+def generate_checker_and_bind(
+    svas: List[str], 
+    module_interface: str, 
+    valid_signals: Set[str], 
+    chosen_top: str, 
+    out_dir: str
+) -> str:
+    """
+    Generate a checker module and bind file for the given SVAs.
+
+    Args:
+        svas (List[str]): List of assertion properties (strings).
+        module_interface (str): The reconstructed module interface declaration.
+        valid_signals (Set[str]): Set of valid signal names extracted from the top module.
+        chosen_top (str): Name of the detected top module.
+        out_dir (str): Directory where the generated SVA file will be written.
+
+    Returns:
+        str: Path to the generated checker and bind .sva file.
+    """
+    identifiers = set()
+    for sva in svas:
+        tokens = re.findall(r"\b[a-zA-Z_]\w*\b", sva)
+        identifiers.update(tokens)
+
+    keywords = {"posedge","negedge","disable","iff","property","assert","endproperty",
+                "logic","begin","end","if","else","inside","not","or","and"}
+    identifiers -= keywords
+
+    missing_signals = identifiers - valid_signals
+    checker_name = f"{chosen_top}_checker"
+    checker_ports = list(valid_signals) + sorted(missing_signals)
+    checker_port_list = ", ".join(checker_ports)
+
+    checker_content = f"{module_interface}\n"
+    for sig in sorted(missing_signals):
+        checker_content += f"  input logic {sig}; // internal (bind)\n"
+    checker_content += "\n"
+    for i, sva in enumerate(svas):
+        checker_content += f"  property a{i};\n{sva}\n  endproperty\n"
+        checker_content += f"  assert_a{i}: assert property(a{i});\n\n"
+    checker_content += "endmodule\n\n"
+
+    bind_lines = [f".{p}({p})" for p in checker_ports]
+    bind_block = f"bind {chosen_top} {checker_name} checker_inst (\n  " + ",\n  ".join(bind_lines) + "\n);\n"
+
+    os.makedirs(out_dir, exist_ok=True)
+    sva_file_path = os.path.join(out_dir, f"{chosen_top}_checker_bind.sva")
+    with open(sva_file_path, "w") as f:
+        f.write(checker_content)
+        f.write(bind_block)
+    return sva_file_path
 
 def extract_signal_names(module_interface: str) -> Set[str]:
     """
