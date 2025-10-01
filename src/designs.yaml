@@ -1,0 +1,35 @@
+task: gen_plan
+design_name: uart
+
+llm:
+  model: "x-ai/grok-4-fast:free"
+  max_tokens_per_prompt: 6000
+  args:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key: ""
+
+gen_plan:
+  max_prompts_per_signal: 10
+  enable_context_enhancement: true
+  generate_SVAs: true
+  valid_signals: ["baud_clk", "baud_freq"]
+
+build_KG:
+  env_source_path: "/content/.env"
+  settings_source_path: "/content/settings.yaml"
+  entity_extraction_prompt_source_path: "/content/AssertionForge/entity_extraction.txt"
+  graphrag_local_dir: "/my/graphrag"
+
+use_KG:
+  KG_root: "/output/graph_artifacts"
+  graphrag_method: "local"
+  query: "What does PREADY mean?"
+
+designs:
+  uart:
+    file_path: "/content/AssertLLM/spec/uart.pdf"
+    design_dir: "/content/AssertLLM/rtl/uart"
+    KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
+    input_file_path: "/content/AssertLLM/spec/uart.pdf"
+    env_source_path: "/content/.env"
+    settings_source_path: "/content/settings.yaml"
