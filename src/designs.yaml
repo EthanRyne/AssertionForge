@@ -31,5 +31,3 @@ designs:
     design_dir: "/content/AssertLLM/rtl/uart"
     KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
     input_file_path: "/content/AssertLLM/spec/uart.pdf"
-    env_source_path: "/content/.env"
-    settings_source_path: "/content/settings.yaml"
