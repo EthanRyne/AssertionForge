@@ -7,14 +7,6 @@ import yaml
 
 from config_schema import AppConfig, LLMConfig, GenPlanStage, BuildKGStage, UseKGStage, DesignPaths
 
-def _deep_update(base: dict, update: dict) -> dict:
-    for k, v in update.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            base[k] = _deep_update(base[k], v)
-        else:
-            base[k] = v
-    return base
-
 def load_app_config(
     designs_yaml: str = "designs.yaml",
     overrides_json: str = "",
@@ -24,7 +16,7 @@ def load_app_config(
         raise FileNotFoundError(f"Config file {designs_yaml} not found")
 
     data = yaml.safe_load(Path(designs_yaml).read_text()) or {}
-
+    # print(data.get("build_KG", {}))
     # Build AppConfig from YAML structure
     cfg = AppConfig(
         task=data.get("task", "gen_plan"),
@@ -44,20 +36,11 @@ def load_app_config(
             elif key == "design_name": cfg.design_name = v
             elif key == "llm_model": cfg.llm.model = v
             elif key == "use_KG": cfg.gen_plan.use_KG = v.lower() == "true"
-
-    # 3) Apply structured JSON overrides (path-like keys)
-    if overrides_json:
-        try:
-            obj = json.loads(overrides_json)
-            merged = _deep_update(cfg.__dict__, obj)
-            cfg = AppConfig(**merged)
-        except Exception as e:
-            raise ValueError(f"Invalid overrides_json: {e}")
     
     # after building cfg
     dp = cfg.designs.get(cfg.design_name)
-    if dp and dp.env_source_path and Path(dp.env_source_path).exists():
-        env_vars = dotenv_values(dp.env_source_path)
+    if dp and cfg.build_KG.env_source_path and Path(cfg.build_KG.env_source_path).exists():
+        env_vars = dotenv_values(cfg.build_KG.env_source_path)
         if "GRAPHRAG_API_KEY" in env_vars:
             cfg.llm.args["api_key"] = env_vars["GRAPHRAG_API_KEY"]
 
@@ -68,14 +51,12 @@ def build_FLAGS_from_cli() -> Any:
     p.add_argument("--task", choices=["gen_plan","build_KG","use_KG"])
     p.add_argument("--design_name")
     p.add_argument("--designs_yaml", default="designs.yaml")
-    p.add_argument("--overrides_json", default="")
     p.add_argument("--valid_signals", nargs="+", help="List of architectural signals")
     args, _ = p.parse_known_args()
 
-    cfg = load_app_config(designs_yaml=args.designs_yaml, overrides_json=args.overrides_json)
+    cfg = load_app_config(designs_yaml=args.designs_yaml)
     if args.task: cfg.task = args.task
     if args.design_name: cfg.design_name = args.design_name
     if args.valid_signals: cfg.gen_plan.valid_signals = args.valid_signals
-
 
     return cfg.to_FLAGS()
