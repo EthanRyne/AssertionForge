@@ -55,6 +55,7 @@ def build_KG():
 
         # Step 3: Update .env file
         print("Step 3: Updating .env file")
+        # print(FLAGS.env_source_path)
         shutil.copy(FLAGS.env_source_path, os.path.join(graph_rag_dir, '.env'))
         print(f"Copied .env from {FLAGS.env_source_path} to {graph_rag_dir}")
         timer.time_and_clear(f'Updating .env file')
@@ -86,9 +87,9 @@ def build_KG():
         print("Step 7: Detecting GraphRAG log folder")
         log_folder = detect_graphrag_log_folder(graph_rag_dir)
         if log_folder:
-            print(f"GraphRAG log folder detected: {log_folder}")
+            print(f"GraphRAG File Detected: {log_folder}")
         else:
-            print("No new GraphRAG log folder detected")
+            print("No GraphRAG detected")
 
         print("Process completed successfully")
 
@@ -154,29 +155,11 @@ def detect_graphrag_log_folder(graph_rag_dir):
     str: Path to the detected log folder, or None if not found
     """
     output_dir = os.path.join(graph_rag_dir, 'output')
-    before_folders = set(os.listdir(output_dir))
-
-    # Run GraphRAG indexing
-    # run_graphrag_index(graph_rag_dir)
-
-    after_folders = set(os.listdir(output_dir))
-    new_folders = after_folders - before_folders
-
-    if not new_folders:
-        return None
-
-    # If multiple new folders, find the one closest to the current timestamp
-    current_ts = get_ts()
-    closest_folder = min(
-        new_folders,
-        key=lambda f: abs(
-            datetime.datetime.strptime(f, '%Y%m%d-%H%M%S')
-            - datetime.datetime.strptime(current_ts, '%Y-%m-%dT%H-%M-%S.%f')
-        ),
-    )
-
-    return os.path.join(output_dir, closest_folder)
-
+    
+    for _file in os.listdir(output_dir):
+        if _file.endswith('.graphml'):
+            return _file
+    return None
 
 def get_base_dir(file_path):
     if isinstance(file_path, list):
@@ -382,5 +365,3 @@ def run_graphrag_index(graph_rag_dir):
 
 if __name__ == "__main__":
     build_KG()
-
-
