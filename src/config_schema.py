@@ -137,8 +137,6 @@ class DesignPaths:
     design_dir: Optional[str] = None
     KG_path: Optional[str] = None
     input_file_path: Optional[str] = None
-    env_source_path: Optional[str] = None
-    settings_source_path: Optional[str] = None
 
 # -------------------
 # Root config
@@ -202,7 +200,5 @@ class AppConfig:
         d["design_dir"] = dp.design_dir
         d["KG_path"] = dp.KG_path
         d["input_file_path"] = dp.input_file_path
-        d["env_source_path"] = dp.env_source_path
-        d["settings_source_path"] = dp.settings_source_path
 
         return SimpleNamespace(**d)
