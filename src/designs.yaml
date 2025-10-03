@@ -2,26 +2,97 @@ task: gen_plan
 design_name: uart
 
 llm:
+  engine_type: "<llm_engine_type>"
   model: "x-ai/grok-4-fast:free"
-  max_tokens_per_prompt: 6000
   args:
     base_url: "https://openrouter.ai/api/v1"
     api_key: ""
+  max_tokens_per_prompt: 8000
 
 gen_plan:
-  max_prompts_per_signal: 10
+  subtask: "actual_gen"
+  DEBUG: false
+  prompt_builder: "dynamic"
   enable_context_enhancement: true
-  generate_SVAs: true
+  max_num_signals_process: inf   # Maximum number of signals to process (inf = no limit)
+  max_prompts_per_signal: 3      # Maximum number of prompts per signal
+  doc_retriever: true
+  chunk_size: 100                # Default doc retriever chunk size
+  overlap: 20                    # Overlap size for chunks
+  doc_k: 3                       # Number of document chunks to retrieve
+  kg_retriever: true             # Enable/disable KG retriever
+  use_KG: true                   # Use KG in retrieval
+  refine_with_rtl: true          # Refine retrieval with RTL signals
+  sva_file_path: null
+  gen_plan_sva_using_valid_signals: true
   valid_signals: ["baud_clk", "baud_freq"]
+  generate_SVAs: true
+  load_dir: null
+
+  dynamic_prompt_settings:
+    rag:
+      enabled: true
+      baseline_full_spec_RTL: false   # Enable a super-simple full-spec RTL baseline (⚠️ can be too trivial)
+      chunk_sizes: [50, 100, 200, 800, 3200]  # Different chunk sizes to try for retrieval
+      overlap_ratios: [0.2, 0.4]      # Different overlap ratios for chunking
+      k: 20                           # Number of chunks to retrieve per configuration
+      enable_rtl: true                # Enable RTL code retrieval (RAG on RTL)
+    
+    path_based:
+      enabled: true
+      max_depth: 5                    # Maximum path length to explore in graph traversal
+      representation_style: "standard" # Options: 'concise', 'standard', 'detailed', 'verification_focused'
+    
+    motif:
+      enabled: false
+      patterns:
+        handshake: true
+        pipeline: true
+        star: true
+      min_star_degree: 3              # Minimum connections for star pattern
+      max_motifs_per_type: 2          # Maximum number of motifs to include per type
+    
+    community:
+      enabled: false
+      max_communities: 20             # Maximum number of communities to include
+      min_community_size: 3           # Minimum community size to consider
+    
+    local_expansion:
+      enabled: false
+      max_depth: 2                    # Maximum BFS depth
+      max_subgraph_size: 20           # Maximum number of nodes in subgraph
+      min_subgraph_size: 5            # Minimum useful subgraph size
+    
+    guided_random_walk:
+      enabled: true
+      num_walks: 70                   # Number of random walks per focus node
+      walk_budget: 100                # Maximum steps per random walk
+      teleport_probability: 0.1       # Probability of teleporting to a gateway node
+      local_importance_weight: 0.3    # Weight for local node importance (alpha)
+      direction_weight: 0.5           # Weight for direction toward targets (beta)
+      discovery_weight: 0.2           # Weight for exploring new areas (gamma)
+      max_targets_per_walk: 10        # Maximum target signals per walk
+      max_contexts_per_signal: 50     # Maximum contexts generated per signal
+    
+    pruning:
+      enabled: true
+      use_llm_pruning: true
+      max_contexts_per_type: 50       # Maximum contexts per generator type
+      max_total_contexts: 100         # Maximum contexts overall
+      min_similarity_threshold: 0.3   # Fallback: minimum similarity threshold
+
+    kg_k: 3
+    traversal_max_depth: 1
+    retrieve_edge: true
 
 build_KG:
-  env_source_path: "/content/.env"
-  settings_source_path: "/content/settings.yaml"
+  env_source_path: "/content/AssertionForge/src/.env"
+  settings_source_path: "/content/AssertionForge/src/settings.yaml"
   entity_extraction_prompt_source_path: "/content/AssertionForge/entity_extraction.txt"
-  graphrag_local_dir: "/my/graphrag"
+  graphrag_local_dir: "/<path>/<to>/graphrag"
 
 use_KG:
-  KG_root: "/output/graph_artifacts"
+  KG_root: "/<path>/<to>/data/apb/graph_rag/output/20240813-163015/artifacts"
   graphrag_method: "local"
   query: "What does PREADY mean?"
 
