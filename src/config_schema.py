@@ -1,7 +1,7 @@
 # config_schema.py
 from dataclasses import dataclass, field, asdict
 from types import SimpleNamespace
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 
 # -------------------
 # LLM config
@@ -133,10 +133,10 @@ class UseKGStage:
 # -------------------
 @dataclass
 class DesignPaths:
-    file_path: Optional[str] = None
+    file_path: Optional[Union[str, List[str]]] = None
     design_dir: Optional[str] = None
     KG_path: Optional[str] = None
-    input_file_path: Optional[str] = None
+    input_file_path: Optional[Union[str, List[str]]] = None
 
 # -------------------
 # Root config
