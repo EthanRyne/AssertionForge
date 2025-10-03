@@ -49,7 +49,7 @@ def load_app_config(
 def build_FLAGS_from_cli() -> Any:
     p = argparse.ArgumentParser()
     p.add_argument("--task", choices=["gen_plan","build_KG","use_KG"])
-    p.add_argument("--design_name")
+    p.add_argument("--design_name", required=True)
     p.add_argument("--designs_yaml", default="designs.yaml")
     p.add_argument("--valid_signals", nargs="+", help="List of architectural signals")
     args, _ = p.parse_known_args()
