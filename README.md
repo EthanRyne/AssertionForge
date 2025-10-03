@@ -31,63 +31,183 @@ For a new design, you'll need to set specific parameters in config.py for both s
 
 ## Stage 1: Knowledge Graph Construction (Indexing)
 
-1. Edit `/<path>/<to>/src/config.py`:
-   - Set `task = 'build_KG'`
-   - Set `design_name` to your new design name
-   - Set paths for your design:
-     ```python
-     input_file_path = "/path/to/your/specification.pdf"
-     ```
-   - Keep GraphRAG paths as standard (usually don't need to change):
-     ```python
-     env_source_path = "/<path>/<to>/rag_apb/.env"
-     settings_source_path = "/<path>/<to>/rag_apb/settings.yaml"
-     entity_extraction_prompt_source_path = "/<path>/<to>/rag_apb/prompts/entity_extraction.txt"
-     graphrag_local_dir = "/<path>/<to>/graphrag"
-     ```
+1. **Edit your `designs.yaml`:**
 
-2. Run the indexing:
-   ```bash
-   python main.py
-   ```
+```yaml
+task: build_KG        # 👈 switch to build_KG stage
+design_name: uart     # 👈 name of your design
 
-3. **Note the KG output path from the console** - you'll need it for Stage 2. It will be something like:
-   ```
-   /<path>/<to>/data/your_design_name/spec/graph_rag_your_design_name/output/[timestamp]/artifacts/clustered_graph.0.graphml
-   ```
+designs:
+  uart:
+    # You can provide either a single file OR multiple files as a list
+    input_file_path: "/content/AssertLLM/spec/uart.pdf"   # 👈 single spec file
+    file_path: "/content/AssertLLM/spec/uart.pdf"         # (alias for convenience)
 
-## Stage 2: Test Plan and SVA Generation
+    # Example with multiple files:
+    # input_file_path:
+    #   - "/content/AssertLLM/spec/uart.pdf"
+    #   - "/content/AssertLLM/spec/uart_appendix.pdf"
+    # file_path:
+    #   - "/content/AssertLLM/spec/uart.pdf"
+    #   - "/content/AssertLLM/spec/uart_appendix.pdf"
 
-1. Edit `/<path>/<to>/src/config.py`:
-   - Set `task = 'gen_plan'`
-   - Set `subtask = 'actual_gen'`
-   - Configure design parameters:
-     ```python
-     design_name = "your_design_name"  # Same as in Stage 1
-     file_path = "/path/to/your/specification.pdf"  # Same as input_file_path from Stage 1
-     design_dir = "/path/to/your/rtl/directory"  # Directory containing your design's .v files
-     KG_path = "/path/from/stage1/output/clustered_graph.0.graphml"  # Path noted from Stage 1
-     ```
-   - Set architectural signals:
-     ```python
-     gen_plan_sva_using_valid_signals = True
-     valid_signals = ['signal1', 'signal2']  # Replace with your design's actual signal names
-     ```
-   - For new designs, disable SVA generation:
-     ```python
-     generate_SVAs = False  # Important for designs without TCL files
-     ```
-   - LLM configuration (usually keep as is):
-     ```python
-     llm_model = "gpt-4o"
-     use_KG = True
-     prompt_builder = "dynamic"
-     ```
+    design_dir: "/content/AssertLLM/rtl/uart"             # RTL directory
+    KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
 
-2. Run the test plan generation:
-   ```bash
-   python main.py
-   ```
+build_KG:
+  env_source_path: "/<path>/<to>/rag_apb/.env"                       # API key env file
+  settings_source_path: "/<path>/<to>/rag_apb/settings.yaml"         # GraphRAG config
+  entity_extraction_prompt_source_path: "/<path>/<to>/rag_apb/prompts/entity_extraction.txt"
+  graphrag_local_dir: "/<path>/<to>/graphrag"
+```
+---
+
+2. **Edit your `.env` file** (default: `/content/AssertionForge/src/.env`)
+
+Add your **GraphRAG API key**:
+
+```ini
+GRAPHRAG_API_KEY=sk-your-api-key-here
+```
+
+This can be an API key from **OpenAI, Anthropic, Google, OpenRouter, etc.** depending on which backend you want to use.
+
+---
+
+3. **Edit your `settings.yaml` file** (default: `/content/AssertionForge/src/settings.yaml`)
+
+Set the **default chat model** you want:
+
+```yaml
+models:
+  default_chat_model:
+    type: openai_chat        # or azure_openai_chat
+    api_base: https://openrouter.ai/api/v1
+    # api_version: 2024-05-01-preview
+    auth_type: api_key       # or azure_managed_identity
+    api_key: ${GRAPHRAG_API_KEY}   # loaded from .env
+    model: x-ai/grok-4-fast:free   # 👈 set this to your desired model
+```
+
+* `type`: choose the provider type (e.g., `openai_chat`, `azure_openai_chat`).
+* `api_base`: endpoint (e.g., OpenRouter, OpenAI, Azure, Anthropic).
+* `model`: the **actual model name** (e.g., `gpt-4o`, `claude-3-sonnet`, `gemini-1.5-pro`, `x-ai/grok-4-fast:free`).
+
+---
+
+4. **Run the builder with CLI (instead of editing config.py):**
+
+```bash
+python main.py --task build_KG --design_name uart --designs_yaml designs.yaml
+```
+
+* `--task build_KG` → tells pipeline to build the KG
+* `--design_name uart` → selects the design block from YAML
+* `--designs_yaml` → points to your YAML file (defaults to `designs.yaml` if not given)
+
+---
+
+| **Note down the graphml file path which will be printed out after completion of the KG Builder step and give it to the `kg_path` under the designs section for you respective design**
+
+| **Test plans will be saved in the log folder of Assertion Forge log saver, the `nl_plan` path will be printed after `Step 5`**
+
+## Stage 2: Test Plan & Assertion (SVA) Generation
+
+1. **Edit your `designs.yaml`:**
+
+```yaml
+task: gen_plan        # 👈 switch to plan + assertion generation
+design_name: uart     # 👈 name of your design
+
+gen_plan:
+  generate_SVAs: true
+  enable_context_enhancement: false
+  max_prompts_per_signal: 10
+
+  # (Optional) Provide architectural signals you want assertions for:
+  valid_signals: ["baud_clk", "baud_freq"]
+
+  # (Optional) Path to an existing or new SVA file
+  sva_file_path: "/content/AssertLLM/output/property_goldmine.sva"
+
+designs:
+  uart:
+    input_file_path: "/content/AssertLLM/spec/uart.pdf"
+    design_dir: "/content/AssertLLM/rtl/uart"
+    KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
+```
+
+---
+
+**Notes on behavior:**
+
+* **If `valid_signals` are provided** → SVAs will be generated for those signals only.
+
+* **If `valid_signals` are not provided** →
+
+  1. The system looks for the signals defined in the **ports of the module inside the provided SVA file** (`sva_file_path`).
+  2. If no SVA file is provided, the system will **automatically generate one** based on the design’s top module ports, and then use those signals.
+
+* **If `sva_file_path` is provided** → SVAs will be written into that file.
+
+* **If `sva_file_path` is not provided** → A new SVA file will be auto-created in the output directory and used for the process.
+
+---
+
+2. **Edit your `.env` file** (default: `/content/AssertionForge/src/.env`)
+
+Make sure you have set your API key:
+
+```ini
+GRAPHRAG_API_KEY=sk-your-api-key-here
+```
+
+---
+
+3. **Edit your `settings.yaml` file** (default: `/content/AssertionForge/src/settings.yaml`)
+
+Choose the model you want to use for generation:
+
+```yaml
+models:
+  default_chat_model:
+    type: openai_chat
+    api_base: https://openrouter.ai/api/v1
+    auth_type: api_key
+    api_key: ${GRAPHRAG_API_KEY}
+    model: x-ai/grok-4-fast:free   # 👈 change to desired model (e.g. gpt-4o, claude-3, gemini-1.5-pro)
+```
+
+---
+
+4. **Run the generator with CLI:**
+
+```bash
+python main.py --task gen_plan --design_name uart --designs_yaml designs.yaml
+```
+
+* `--task gen_plan` → runs plan + assertion generation.
+* `--design_name uart` → selects the design block from YAML.
+* `--designs_yaml` → points to your YAML config (defaults to `designs.yaml` if not given).
+
+---
+
+5. **Completion message**
+
+* If SVAs are generated:
+
+  ```
+  Test plan and Assertion generation process completed.
+  Nl Test Plan Files: ....
+  SVA File: ....
+  ```
+* If SVAs are not generated:
+
+  ```
+  Test plan generation process completed.
+  Nl Test Plan Files: ....
+  ```
+
 
 ## Parameter Details for New Designs
 
