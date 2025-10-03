@@ -144,6 +144,7 @@ def gen_plan():
                     f.write(f'Plan {c}: {plan}\n')
                     c += 1
                 f.write('\n')
+        
         timer.time_and_clear("Generate NL plans")
 
         if FLAGS.generate_SVAs:
@@ -171,24 +172,32 @@ def gen_plan():
             print("Step 7: Writing SVAs to files...")
             sva_file_paths, _ = write_svas_to_file(svas)
             timer.time_and_clear("Write SVAs to files")
+            
+        if FLAGS.generate_SVAs: 
+          print('Test plan and Assertion generation process completed.') 
+          print(f"<[!]> nl test plans saved to {Path(saver.logdir)}/nl_plans.txt")
+          print(f"<[!]> svas saved to {sva_file_paths}")
+        else:
+          print('Test plan generation process completed.')
+          print(f"<[!]> nl test plans saved to {Path(saver.logdir)}/nl_plans.txt")
+        
+            # print("Step 8: Generating TCL scripts...")
+            # tcl_file_paths = generate_tcl_scripts(sva_file_paths)
+            # timer.time_and_clear("Generate TCL scripts")
 
-            print("Step 8: Generating TCL scripts...")
-            tcl_file_paths = generate_tcl_scripts(sva_file_paths)
-            timer.time_and_clear("Generate TCL scripts")
+            # print("Step 9: Running JasperGold...")
+            # jasper_reports = run_jaspergold(tcl_file_paths)
+            # timer.time_and_clear("Run JasperGold")
 
-            print("Step 9: Running JasperGold...")
-            jasper_reports = run_jaspergold(tcl_file_paths)
-            timer.time_and_clear("Run JasperGold")
+            # print("Step 10: Analyzing coverage of proven SVAs...")
+            # coverage_report = analyze_coverage_of_proven_svas(svas, jasper_reports)
+            # timer.time_and_clear("Analyze coverage of proven SVAs")
 
-            print("Step 10: Analyzing coverage of proven SVAs...")
-            coverage_report = analyze_coverage_of_proven_svas(svas, jasper_reports)
-            timer.time_and_clear("Analyze coverage of proven SVAs")
+            # print("Step 11: Analyzing and printing results...")
+            # analyze_results(pdf_stats, nl_plans, svas, jasper_reports, coverage_report)
+            # timer.time_and_clear("Analyze results")
 
-            print("Step 11: Analyzing and printing results...")
-            analyze_results(pdf_stats, nl_plans, svas, jasper_reports, coverage_report)
-            timer.time_and_clear("Analyze results")
-
-            print('Test plan generation and coverage evaluation process completed.')
+            # print('Test plan generation and coverage evaluation process completed.')
 
     elif FLAGS.subtask == 'parse_result':
         print("Parsing results from a previous run...")
@@ -941,7 +950,7 @@ def write_svas_to_file(svas: List[str], design_dir: str, out_dir: str="./_out") 
     """
     module_interface, valid_signals = None, set()
     chosen_top = None
-    out_dir = FLAG.sva_out_dir or FLAGS.design_dir
+    out_dir = FLAGS.sva_out_dir or FLAGS.design_dir
 
     # Step 1: Try to find an existing property_goldmine.sva
     module_interface, valid_signals = find_existing_sva(FLAGS.design_dir)
