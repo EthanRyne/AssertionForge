@@ -64,7 +64,7 @@ gen_plan:
       min_subgraph_size: 5            # Minimum useful subgraph size
     
     guided_random_walk:
-      enabled: true
+      enabled: false
       num_walks: 70                   # Number of random walks per focus node
       walk_budget: 100                # Maximum steps per random walk
       teleport_probability: 0.1       # Probability of teleporting to a gateway node
@@ -98,7 +98,10 @@ use_KG:
 
 designs:
   uart:
-    file_path: "/content/AssertLLM/spec/uart.pdf"
+    file_path: 
+      - "/content/AssertLLM/spec/uart.pdf"
     design_dir: "/content/AssertLLM/rtl/uart"
     KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
-    input_file_path: "/content/AssertLLM/spec/uart.pdf"
+    input_file_path: 
+      - "/content/AssertLLM/spec/uart.pdf"
+
