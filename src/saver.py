@@ -60,7 +60,7 @@ class Saver(object):
             get_root_path(),
             'logs',
             # '{}_{}_{}_{}_{}_{}_{}'.format(FLAGS.norm_method, FLAGS.task, FLAGS.subtask, FLAGS.tag, FLAGS.target, model_str, get_ts()))
-            '{}_{}_{}_{}'.format(FLAGS.task, get_ts(), FLAGS.hostname, FLAGS.user),
+            '{}_{}'.format(FLAGS.task, get_ts()),
         )
 
         self.accelerator = None
