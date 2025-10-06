@@ -5,7 +5,7 @@ from typing import Any
 from dotenv import dotenv_values
 import yaml
 
-from config_schema import AppConfig, LLMConfig, GenPlanStage, BuildKGStage, UseKGStage, DesignPaths
+from config_schema import AppConfig, LLMConfig, GenPlanStage, BuildKGStage, UseKGStage, DesignPaths, DynamicPromptSettings
 
 def load_app_config(
     designs_yaml: str = "designs.yaml",
