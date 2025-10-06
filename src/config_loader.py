@@ -28,6 +28,9 @@ def load_app_config(
         designs={name: DesignPaths(**entry) for name, entry in data.get("designs", {}).items()},
     )
 
+    if isinstance(cfg.gen_plan.dynamic_prompt_settings, dict):
+        cfg.gen_plan.dynamic_prompt_settings = DynamicPromptSettings(**cfg.gen_plan.dynamic_prompt_settings)
+        
     # 2) Apply ENV overrides (flat)
     for k, v in os.environ.items():
         if k.startswith(env_prefix):
