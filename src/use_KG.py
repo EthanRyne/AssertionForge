@@ -40,7 +40,7 @@ def use_KG():
         print(f"Query Method: {query_method}")
         print(f"Query: {query}")
 
-        command = f"export PYTHONPATH='{FLAGS.graphrag_local_dir}:$PYTHONPATH' && python -m graphrag.query --data {kg_root} --method {query_method} \"{query}\""
+        command = f"graphrag query --root {kg_root} --method {query_method} --query '{query}'"
         print(command)
         timer.time_and_clear("Setup")
 
