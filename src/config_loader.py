@@ -51,15 +51,40 @@ def load_app_config(
 
 def build_FLAGS_from_cli() -> Any:
     p = argparse.ArgumentParser()
-    p.add_argument("--task", choices=["gen_plan","build_KG","use_KG"])
+    p.add_argument("--task", choices=["gen_plan", "build_KG", "use_KG"], required=True)
     p.add_argument("--design_name", required=True)
     p.add_argument("--designs_yaml", default="designs.yaml")
     p.add_argument("--valid_signals", nargs="+", help="List of architectural signals")
+
+    # use_KG stage arguments
+    p.add_argument("--KG_root", help="Root path to GraphRAG KG output (optional, defaults to YAML)")
+    p.add_argument("--graphrag_method", help="GraphRAG method to use (optional, defaults to YAML)")
+    p.add_argument("--query", help="Query string for KG use stage (required for use_KG)")
+
     args, _ = p.parse_known_args()
 
+    # Load YAML config first
     cfg = load_app_config(designs_yaml=args.designs_yaml)
-    if args.task: cfg.task = args.task
-    if args.design_name: cfg.design_name = args.design_name
-    if args.valid_signals: cfg.gen_plan.valid_signals = args.valid_signals
+
+    # Apply top-level CLI overrides
+    cfg.task = args.task
+    cfg.design_name = args.design_name
+    if args.valid_signals:
+        cfg.gen_plan.valid_signals = args.valid_signals
+
+    # Handle use_KG stage
+    if args.task == "use_KG":
+        # query must always be provided
+        if not args.query:
+            p.error("--query is required when --task use_KG")
+
+        # only override YAML if CLI args are explicitly provided
+        if args.KG_root:
+            cfg.use_KG.KG_root = args.KG_root
+        if args.graphrag_method:
+            cfg.use_KG.graphrag_method = args.graphrag_method
+
+        # query always comes from CLI
+        cfg.use_KG.query = args.query
 
     return cfg.to_FLAGS()
