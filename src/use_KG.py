@@ -44,7 +44,22 @@ def use_KG():
         print(command)
         timer.time_and_clear("Setup")
 
-        # Step 2: Execute the query
+        # Step 2: Update .env file
+        # print(FLAGS.env_source_path)
+        shutil.copy(FLAGS.env_source_path, os.path.join(kg_root, '.env'))
+        print(f"Copied .env from {FLAGS.env_source_path} to {kg_root}")
+        timer.time_and_clear(f'Updating .env file')
+
+        # Step 3: Update settings.yaml file
+        shutil.copy(
+            FLAGS.settings_source_path, os.path.join(kg_root, 'settings.yaml')
+        )
+        print(
+            f"Copied settings.yaml from {FLAGS.settings_source_path} to {kg_root}"
+        )
+        timer.time_and_clear(f'Updating settings.yaml file')
+
+        # Step 4: Execute the query
         print("Executing GraphRAG query...")
         process = subprocess.Popen(
             command,
@@ -55,8 +70,8 @@ def use_KG():
             bufsize=1,
             universal_newlines=True,
         )
-
-        # Step 3: Capture and print the output
+        
+        # Step 5: Capture and print the output
         print("Query Output:")
         full_output = ""
         for line in process.stdout:
