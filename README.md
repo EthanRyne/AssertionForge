@@ -207,6 +207,111 @@ python main.py --task gen_plan --design_name uart --designs_yaml designs.yaml
   Test plan generation process completed.
   Nl Test Plan Files: ....
   ```
+## Stage 3: Knowledge Graph (KG) Query & Usage
+
+1. **Edit your `designs.yaml`:**
+
+```yaml
+task: use_KG          # 👈 switch to the Knowledge Graph usage stage
+design_name: uart     # 👈 name of your design
+
+use_KG:
+  KG_root: "/<path>/<to>/data/apb/graph_rag/output/20240813-163015/artifacts"   # 👈 path to GraphRAG artifacts
+  graphrag_method: "local"    # 👈 can be "local" or "api" depending on setup
+  query: "What does PREADY mean?"  # 👈 required query to run against the KG
+
+build_KG:
+  env_source_path: "/content/AssertionForge/src/.env"
+  settings_source_path: "/content/AssertionForge/src/settings.yaml"
+  entity_extraction_prompt_source_path: "/content/AssertionForge/entity_extraction.txt"
+  graphrag_local_dir: "/<path>/<to>/graphrag"
+
+designs:
+  uart:
+    input_file_path: ["/content/AssertLLM/spec/uart.pdf"]
+    design_dir: "/content/AssertLLM/rtl/uart"
+    KG_path: "/content/AssertLLM/spec/graph_rag_uart/output/graph.graphml"
+```
+
+---
+
+**Notes on behavior:**
+
+* The **`use_KG` stage** enables querying and reasoning over the Knowledge Graph built during **Stage 1** (`build_KG`).
+
+* The model used for answering the KG query is **automatically loaded** from the `settings.yaml` file defined under:
+
+  ```yaml
+  build_KG:
+    settings_source_path: "/content/AssertionForge/src/settings.yaml"
+  ```
+
+* The API key and environment variables (e.g., `GRAPHRAG_API_KEY`) are fetched from the `.env` file located at:
+
+  ```yaml
+  build_KG:
+    env_source_path: "/content/AssertionForge/src/.env"
+  ```
+
+* The **GraphRAG engine** reads from `use_KG.KG_root` — which should point to the **artifacts directory** generated during the KG building stage.
+
+* The `graphrag_method` defines how to query:
+
+  * `"local"` → To fetch information on localized information in a document.
+  * `"global"` → To fetch the over all information from the document for a broader answer.
+
+* The `query` field is **mandatory** when running `--task use_KG`.
+  `KG_root` and `graphrag_method` are optional if they already exist in your YAML file.
+
+---
+
+2. **Edit your `.env` file** (default: `/content/AssertionForge/src/.env`)
+
+Make sure your environment key is set correctly for the LLM backend:
+
+```ini
+GRAPHRAG_API_KEY=sk-your-api-key-here
+```
+
+This is the same API key used for both `build_KG` and `use_KG` stages.
+
+---
+
+3. **Edit your `settings.yaml` file** (default: `/content/AssertionForge/src/settings.yaml`)
+
+Ensure that your model configuration under `models:` aligns with the one you wish to use for answering KG queries:
+
+```yaml
+models:
+  default_chat_model:
+    type: openai_chat
+    api_base: https://openrouter.ai/api/v1
+    auth_type: api_key
+    api_key: ${GRAPHRAG_API_KEY}
+    model: x-ai/grok-4-fast:free   # 👈 change if needed (e.g. gpt-4o, claude-3, gemini-1.5-pro)
+```
+
+> **Note:** The model and environment settings here are **inherited automatically** during the `use_KG` stage using the paths defined under `build_KG`.
+
+---
+
+4. **Run the KG Query CLI:**
+
+```bash
+python main.py --task use_KG --design_name uart --query "What does PREADY mean?"
+```
+
+* `--task use_KG` → triggers the Knowledge Graph reasoning and query mode.
+* `--design_name uart` → selects the UART design section from YAML.
+* `--query` → the natural language question to ask about the KG.
+* Optional overrides:
+
+  ```bash
+  --KG_root "/path/to/graphrag_root_dir" 
+  --graphrag_method local
+  ```
+
+---
 
 
 ## Parameter Details for New Designs
@@ -237,25 +342,6 @@ python main.py --task gen_plan --design_name uart --designs_yaml designs.yaml
 - For new designs, keep `generate_SVAs = False` since TCL files might not be provided.
 - Always specify `valid_signals` with the actual architectural signals from your design.
 - Architectural signals are typically input/output ports and architectural-level registers mentioned in the specification.
-
-## Example Workflow for a New Design
-
-```bash
-# Activate environment
-cd /<path>/<to>/src && conda activate fv
-
-# Edit config.py for build_KG task with your design information
-# Then run:
-python main.py
-
-# When KG construction is complete, note the output path
-# Edit config.py for gen_plan task with the correct KG_path
-# Then run:
-python main.py
-```
-
-This is the recommended workflow for reliable operation of AssertionForge with new designs.
-
 
 ## Knowledge Graph Example
 
