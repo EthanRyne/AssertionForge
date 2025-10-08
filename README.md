@@ -311,8 +311,6 @@ python main.py --task use_KG --design_name uart --query "What does PREADY mean?"
   --graphrag_method local
   ```
 
----
-
 
 ## Parameter Details for New Designs
 
