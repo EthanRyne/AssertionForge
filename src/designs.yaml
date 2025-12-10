@@ -24,6 +24,7 @@ gen_plan:
   use_KG: true                   # Use KG in retrieval
   refine_with_rtl: true          # Refine retrieval with RTL signals
   sva_file_path: null
+  sva_out_dir: "/content/svas"
   gen_plan_sva_using_valid_signals: true
   valid_signals: ["baud_clk", "baud_freq"]
   generate_SVAs: true
