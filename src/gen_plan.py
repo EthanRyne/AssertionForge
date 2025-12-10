@@ -32,13 +32,14 @@ from PyPDF2 import PdfReader
 import json
 import random
 import re
+import glob
 import pandas as pd
 from tabulate import tabulate
 from pathlib import Path
 from tqdm import tqdm
 
 print = saver.log_info
-
+FLAGS.max_num_signals_process = float(FLAGS.max_num_signals_process)
 
 def gen_plan():
     """
@@ -933,7 +934,7 @@ def parse_nl_plans(result: str) -> Dict[str, List[str]]:
     return nl_plans
 
 
-def write_svas_to_file(svas: List[str], design_dir: str, out_dir: str="./_out") -> Tuple[List[str], Set[str]]:
+def write_svas_to_file(svas: List[str], design_dir: str = None, out_dir: str = None) -> Tuple[List[str], Set[str]]:
     """
     Main orchestration function for the SVA pipeline.
     - If no SVAs are provided, return the valid signal names only.
@@ -950,13 +951,14 @@ def write_svas_to_file(svas: List[str], design_dir: str, out_dir: str="./_out") 
     """
     module_interface, valid_signals = None, set()
     chosen_top = None
-    out_dir = FLAGS.sva_out_dir or FLAGS.design_dir
+    design_dir = design_dir or FLAGS.design_dir
+
 
     # Step 1: Try to find an existing property_goldmine.sva
-    module_interface, valid_signals = find_existing_sva(FLAGS.design_dir)
+    module_interface, valid_signals = find_existing_sva(design_dir)
     if not module_interface:
         print("Finding existing SVAs to write to")
-        module_interface, valid_signals, chosen_top = extract_signals_from_rtl(FLAGS.design_dir)
+        module_interface, valid_signals, chosen_top = extract_signals_from_rtl(design_dir)
     else:
         chosen_top = re.search(r'module\s+(\w+)', module_interface).group(1)
 
@@ -964,7 +966,7 @@ def write_svas_to_file(svas: List[str], design_dir: str, out_dir: str="./_out") 
     if not svas:   # no SVAs → return only signals
         return [], valid_signals
     else:          # SVAs exist → generate checker+bind
-        file_path = generate_checker_and_bind(svas, module_interface, valid_signals, chosen_top, out_dir)
+        file_path = generate_checker_and_bind(svas, module_interface, valid_signals, chosen_top, FLAGS.sva_out_dir)
         return [file_path], valid_signals
 
 
