@@ -109,6 +109,7 @@ class GenPlanStage:
     use_KG: bool = True
     refine_with_rtl: bool = True
     sva_file_path: str = None
+    sva_out_dir: str = None
     gen_plan_sva_using_valid_signals: bool = True
     valid_signals: Optional[List[str]] = None
     generate_SVAs: bool = False
@@ -175,6 +176,7 @@ class AppConfig:
             "use_KG": self.gen_plan.use_KG,
             "refine_with_rtl": self.gen_plan.refine_with_rtl,
             "sva_file_path": self.gen_plan.sva_file_path,
+            "sva_out_dir": self.gen_plan.sva_out_dir,
             "gen_plan_sva_using_valid_signals": self.gen_plan.gen_plan_sva_using_valid_signals,
             "valid_signals": self.gen_plan.valid_signals,
             "generate_SVAs": self.gen_plan.generate_SVAs,
