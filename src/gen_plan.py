@@ -25,7 +25,9 @@ from saver import saver
 from utils import OurTimer
 from utils_LLM import get_llm, llm_inference
 from pyverilog.vparser.parser import parse
-from pyverilog.vparser.ast import ModuleDef, Ioport, InstanceList
+from pyverilog.vparser.ast import ModuleDef, Decl, Wire, Reg, InstanceList, Instance, Identifier, Ioport, Input, Output, Inout
+
+
 import networkx as nx
 from typing import Tuple, List, Dict, Optional, Set, Union
 from PyPDF2 import PdfReader
@@ -81,13 +83,21 @@ def gen_plan():
         timer.time_and_clear("Initialize LLM")
 
         print("Step 4: Extracting valid signal names...")
-        if FLAGS.valid_signals is None:
-            _, valid_signals = write_svas_to_file(
+        if not FLAGS.valid_signals:
+            _, valid_signals, signal_hierarchy = write_svas_to_file(
                 []
             )  # We pass an empty list just to extract valid signals
+            if FLAGS.include_internal_signals:
+                total_signals = 0
+                for key, value in signal_hierarchy.items():
+                    total_signals += len(value)
+                print(f"Extracted signal names: {signal_hierarchy} \nTotal signals: {total_signals}")
+                print(f"Pruned and cleaned signals: {valid_signals} \nSelected signals: {len(valid_signals)}")
+            else:
+                print(f"Valid signal names: {', '.join(sorted(valid_signals))}")
         else:
             valid_signals = FLAGS.valid_signals    
-        print(f"Valid signal names: {', '.join(sorted(valid_signals))}")
+            print(f"Valid signal names: {', '.join(sorted(valid_signals))}")
         timer.time_and_clear("Extract valid signals")
 
         # Initialize context enhancement if enabled - do this after we have valid_signals
@@ -952,22 +962,22 @@ def write_svas_to_file(svas: List[str], design_dir: str = None, out_dir: str = N
     module_interface, valid_signals = None, set()
     chosen_top = None
     design_dir = design_dir or FLAGS.design_dir
-
+    signal_hierarchy = {}
 
     # Step 1: Try to find an existing property_goldmine.sva
     module_interface, valid_signals = find_existing_sva(design_dir)
     if not module_interface:
         print("Finding existing SVAs to write to")
-        module_interface, valid_signals, chosen_top = extract_signals_from_rtl(design_dir)
+        module_interface, valid_signals, chosen_top, signal_hierarchy = extract_signals_from_rtl(design_dir)
     else:
         chosen_top = re.search(r'module\s+(\w+)', module_interface).group(1)
 
     # Step 2: Behavior depending on input
     if not svas:   # no SVAs → return only signals
-        return [], valid_signals
+        return [], valid_signals, signal_hierarchy
     else:          # SVAs exist → generate checker+bind
         file_path = generate_checker_and_bind(svas, module_interface, valid_signals, chosen_top, FLAGS.sva_out_dir)
-        return [file_path], valid_signals
+        return [file_path], valid_signals, signal_hierarchy
 
 
 def generate_tcl_scripts(sva_file_paths: List[str]) -> List[str]:
@@ -1428,8 +1438,56 @@ def find_existing_sva(design_dir: str) -> Tuple[str, Set[str]]:
     valid_signals = extract_signal_names(content)
     return module_interface, valid_signals
 
-
 def extract_signals_from_rtl(design_dir: str) -> Tuple[str, Set[str], str]:
+    """
+    New wrapper that keeps original behavior and adds internal/hierarchical extraction
+    when cfg.include_internal_signals = True.
+    """
+
+    # Use your accurate old parser
+    module_interface, top_ports, chosen_top = _extract_top_rtl_ports_old(design_dir)
+
+    # EXACT old behavior unless flag is enabled
+    if not FLAGS.include_internal_signals:
+        return module_interface, top_ports, chosen_top, {}
+
+    # Extract internal signals (PATCH 2)
+    internal_signals = extract_internal_signals_with_pyverilog(design_dir)
+
+    # Extract hierarchical signals (PATCH 3)
+    hierarchical_signals = extract_hierarchical_signals(
+        design_dir,
+        top_module=chosen_top,
+        max_depth=FLAGS.hierarichal_signal_depth,
+        include_ports=False
+    )
+
+    # Create segregated hierarchy
+    signal_hierarchy = {"top_ports":top_ports, "internal_signals":internal_signals, "hierarchical_signals":hierarchical_signals}
+
+    if FLAGS.prune_signals:
+      # Step 1 — Run basic filtering (PATCH 4)
+      internal_signals = filter_signal_set(internal_signals)
+      hierarchical_signals = filter_signal_set(hierarchical_signals)
+
+      # Step 2 — Remove propagation of ports inside hierarchy
+      hierarchical_signals = prune_hierarchical_signals(hierarchical_signals, top_ports)
+
+      # Step 3 — Remove hierarchical shadows of internal nets
+      hierarchical_signals = remove_child_port_shadows(hierarchical_signals, internal_signals)
+
+    # Merge
+    valid_signals = set()
+    valid_signals |= top_ports
+    valid_signals |= internal_signals
+    valid_signals |= hierarchical_signals
+
+    # Filter (PATCH 4)
+    valid_signals = filter_signal_set(valid_signals)
+
+    return module_interface, valid_signals, chosen_top, signal_hierarchy
+
+def _extract_top_rtl_ports_old(design_dir: str) -> Tuple[str, Set[str], str]:
     """
     Parse RTL files using PyVerilog to extract the top module and its ports.
 
@@ -1509,6 +1567,343 @@ def extract_signals_from_rtl(design_dir: str) -> Tuple[str, Set[str], str]:
     valid_signals = set(port_names)
     module_interface = f"module {chosen_top}({', '.join(port_names)});"
     return module_interface, valid_signals, chosen_top
+
+def extract_internal_signals_with_pyverilog(design_dir: str) -> Set[str]:
+    """
+    Extract internal (non-port) RTL signals using PyVerilog.
+    This includes wires, regs, logic, integers, and internal declarations.
+
+    Args:
+        design_dir (str): Path to directory containing Verilog RTL files.
+
+    Returns:
+        Set[str]: internal signal names found inside all modules.
+    """
+    import glob
+    import os
+
+    # Collect all .v and .sv files
+    rtl_files = glob.glob(os.path.join(design_dir, "*.v")) + \
+                glob.glob(os.path.join(design_dir, "*.sv"))
+
+    if not rtl_files:
+        print("[WARN] No RTL files found for internal extraction")
+        return set()
+
+    try:
+        ast, _ = parse(rtl_files)
+    except Exception as e:
+        print("[ERROR] PyVerilog failed to parse RTL:", e)
+        return set()
+
+    internal_signals = set()
+
+    # Traverse AST for module definitions and internal declarations
+    for child in ast.description.definitions:
+        if isinstance(child, ModuleDef):
+
+            # Traverse declarations inside each module
+            for item in child.items:
+                if isinstance(item, Decl):
+                    for decl in item.list:
+                        # Wires
+                        if isinstance(decl, Wire):
+                            internal_signals.add(decl.name)
+                        # Regs
+                        elif isinstance(decl, Reg):
+                            internal_signals.add(decl.name)
+                        # In some designs PyVerilog stores logic/reg differently
+                        elif hasattr(decl, "name"):
+                            internal_signals.add(decl.name)
+
+    return internal_signals
+
+def build_module_map(ast):
+    """
+    Build a map of module_name -> ModuleDef node for quick lookup.
+    """
+    module_map = {}
+    for child in ast.description.definitions:
+        if isinstance(child, ModuleDef):
+            module_map[child.name] = child
+    return module_map
+
+
+def _collect_decls_from_module(module_node):
+    """
+    Collect declaration (internal) names and port names from a ModuleDef node.
+    Returns (ports_set, internals_set)
+    """
+    ports = set()
+    internals = set()
+
+    # Ports: module_node.portlist may hold port names as Identifier objects
+    try:
+        # module_node.portlist is a Portlist object with .ports (list of Port)
+        if hasattr(module_node, "portlist") and module_node.portlist:
+            for p in getattr(module_node.portlist, "ports", []):
+                # Port may have .name or .children[0] as Identifier
+                try:
+                    if hasattr(p, "name") and p.name:
+                        ports.add(p.name)
+                    elif hasattr(p, "children") and p.children:
+                        # fallback
+                        first = p.children[0]
+                        if hasattr(first, "name"):
+                            ports.add(first.name)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Internal declarations
+    for item in getattr(module_node, "items", []):
+        if isinstance(item, Decl):
+            for decl in getattr(item, "list", []):
+                # Many declaration node types have .names or .name attribute
+                try:
+                    # Wire, Reg
+                    if hasattr(decl, "name") and decl.name:
+                        # single-name node
+                        internals.add(decl.name)
+                    else:
+                        # some nodes expose .list of Declr
+                        for possible in getattr(decl, "list", []):
+                            if hasattr(possible, "name"):
+                                internals.add(possible.name)
+                except Exception:
+                    # best-effort
+                    try:
+                        if hasattr(decl, "names"):
+                            for nm in decl.names:
+                                if hasattr(nm, "name"):
+                                    internals.add(nm.name)
+                    except Exception:
+                        continue
+    return ports, internals
+
+
+def _find_instances_in_module(module_node):
+    """
+    Return list of Instance objects found inside the module node (flat).
+    """
+    instances = []
+    for item in getattr(module_node, "items", []):
+        if isinstance(item, InstanceList):
+            for inst in getattr(item, "instances", []):
+                instances.append(inst)
+    return instances
+
+
+def extract_hierarchical_signals(design_dir: str, top_module: str = None, max_depth: int = 3, include_ports: bool = False) -> Set[str]:
+    """
+    Extract hierarchical signals from design by traversing module instances starting
+    from the top module (if provided) or the first module in the AST.
+
+    Returns a set of hierarchical signal names like: top.uart_rx.bit_cnt
+
+    Args:
+        design_dir: path to RTL files (same as other extractors)
+        top_module: name of the top-level module (optional). If None, pick first module.
+        max_depth: maximum hierarchy depth to traverse (prevents explosion)
+        include_ports: if True, include each module's ports as well as internals
+
+    Returns:
+        Set[str]: hierarchical signal names
+    """
+    import glob, os
+    rtl_files = glob.glob(os.path.join(design_dir, "*.v")) + glob.glob(os.path.join(design_dir, "*.sv"))
+    if not rtl_files:
+        print("[WARN] No RTL files found for hierarchical extraction")
+        return set()
+
+    try:
+        ast, _ = parse(rtl_files)
+    except Exception as e:
+        print("[ERROR] PyVerilog parse failed for hierarchical extraction:", e)
+        return set()
+
+    module_map = build_module_map(ast)
+    if not module_map:
+        return set()
+
+    # choose top
+    if top_module is None:
+        # Heuristic: prefer module with same name as design_dir basename or first module
+        guessed = os.path.basename(os.path.normpath(design_dir))
+        if guessed in module_map:
+            top_module = guessed
+        else:
+            # fallback to first module in map
+            top_module = next(iter(module_map.keys()))
+
+    # BFS/DFS traversal
+    hierarchical_signals = set()
+    visited = set()
+
+    def traverse(module_name: str, inst_path: str, depth: int):
+        """
+        Recursive traversal. inst_path is the hierarchical prefix (e.g., top.u1.u2).
+        """
+        if depth < 0:
+            return
+        if module_name not in module_map:
+            return
+
+        unique_node_key = f"{module_name}::{inst_path}"
+        if unique_node_key in visited:
+            return
+        visited.add(unique_node_key)
+
+        module_node = module_map[module_name]
+        ports, internals = _collect_decls_from_module(module_node)
+
+        # include internals
+        for sig in internals:
+            hierarchical_signals.add(f"{inst_path}.{sig}" if inst_path else f"{module_name}.{sig}")
+
+        # optionally include ports
+        if include_ports:
+            for p in ports:
+                hierarchical_signals.add(f"{inst_path}.{p}" if inst_path else f"{module_name}.{p}")
+
+        # find instances and traverse
+        instances = _find_instances_in_module(module_node)
+        for inst in instances:
+            try:
+                # Instance has .module in some pyverilog versions or .module in InstanceList item
+                child_module_type = getattr(inst, "module", None) or getattr(inst, "module", None)
+                child_inst_name = getattr(inst, "name", None) or getattr(inst, "instname", None)
+                if child_module_type is None:
+                    # try to extract from inst.module if it's an Identifier
+                    if hasattr(inst, "module") and hasattr(inst.module, "name"):
+                        child_module_type = inst.module.name
+                # instance names sometimes are strings; if not, skip
+                if child_inst_name is None:
+                    child_inst_name = getattr(inst, "name", None) or getattr(inst, "instname", None)
+                if child_inst_name is None or child_module_type is None:
+                    continue
+                # build new path
+                new_path = f"{inst_path}.{child_inst_name}" if inst_path else f"{child_inst_name}"
+                traverse(child_module_type, new_path, depth - 1)
+            except Exception:
+                # best-effort: skip instance on error
+                continue
+
+    traverse(top_module, top_module, max_depth)
+    return hierarchical_signals
+
+def prune_hierarchical_signals(hier_set: Set[str], top_ports: Set[str]) -> Set[str]:
+    """
+    Remove redundant hierarchical signals such as:
+        - uart2bus_top.clock  (duplicate of top-level port 'clock')
+        - uart2bus_top.uart1.clock (propagated clock)
+        - any hierarchical signal whose final basename is a top-level port
+    """
+    pruned = set()
+
+    for sig in hier_set:
+        base = sig.split('.')[-1]
+
+        # Remove hierarchical duplicates of ports
+        if base in top_ports:
+            continue
+
+        # Remove hierarchical clock/reset propagation
+        if base.lower() in ("clock", "clk", "reset", "rst", "rst_n"):
+            continue
+
+        pruned.add(sig)
+
+    return pruned
+
+
+def remove_child_port_shadows(hier_set: Set[str], internal_set: Set[str]) -> Set[str]:
+    """
+    Remove hierarchical signals that only shadow internal signals.
+    Example:
+      - uart2bus_top.uart1.uart_tx_1.bit_count
+      - bit_count   <-- internal signal already exists
+
+    Keep only the shorter (non-hierarchical) version.
+    """
+    pruned = set()
+    internal_basenames = {s.split('.')[-1] for s in internal_set}
+
+    for sig in hier_set:
+        base = sig.split('.')[-1]
+        if base in internal_basenames:
+            continue  # reduce duplication
+        pruned.add(sig)
+
+    return pruned
+
+def filter_signal_name(name: str) -> bool:
+    """
+    Return True if the signal name should be kept, False if it should be filtered out.
+    This removes tool-generated names, temporary nets, synthetic identifiers,
+    and other noise that confuses the LLM.
+    """
+
+    # Remove empty or None
+    if not name or not isinstance(name, str):
+        return False
+
+    # Strip hierarchical prefixes for pattern matching
+    base = name.split('.')[-1]
+
+    # 1. Remove auto-generated synthesis names (common patterns)
+    autogenerated_patterns = [
+        r'^_+',              # _tmp, __net, ___abc123
+        r'^n\d+$',           # n1234
+        r'^tmp\d+$',         # tmp12
+        r'^genblk\d+',       # genblk1, genblk3_
+        r'^_zz_.*',          # _zz_123 (chisel/verilator)
+        r'^_\d+$',           # _42
+        r'^unnamed.*',       # unnamed blocks
+    ]
+    for pattern in autogenerated_patterns:
+        if re.match(pattern, base):
+            return False
+
+    # 2. Remove number-only nets
+    if re.match(r'^\d+$', base):
+        return False
+
+    # 3. Remove Verilog parameters/constants
+    const_patterns = [
+        r'^[A-Z0-9_]+$',  # ALL CAPS → usually parameters
+        r'^D_.*',         # parameter naming (D_BAUD_LIMIT)
+    ]
+    for pattern in const_patterns:
+        if re.match(pattern, base):
+            return False
+
+    # 4. Remove numeric-index hierarchical expansions
+    if '[' in name or ']' in name:
+        # we do NOT remove bits like signal[3], but we remove genblk[3].foo
+        if "genblk" in name:
+            return False
+
+    # 5. Remove clock/reset variants IF user only wants top-level clocks
+    # (optional — keep for now)
+    ignore_list = [
+        "rst_n", "resetn", "reset", "clk", "clock"
+    ]
+    if base.lower() in ignore_list:
+        # Keep them for now; comment this line to filter them
+        pass
+
+    # Otherwise keep this signal
+    return True
+
+
+
+def filter_signal_set(signals: Set[str]) -> Set[str]:
+    """
+    Apply filter_signal_name() to an entire set. Removes duplicates automatically.
+    """
+    return {sig.split(".")[-1] for sig in signals if filter_signal_name(sig)}
 
 
 def generate_checker_and_bind(
