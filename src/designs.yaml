@@ -3,7 +3,7 @@ design_name: uart
 
 llm:
   engine_type: "<llm_engine_type>"
-  model: "x-ai/grok-4-fast:free"
+  model: "arcee-ai/trinity-mini"
   args:
     base_url: "https://openrouter.ai/api/v1"
     api_key: ""
@@ -14,19 +14,22 @@ gen_plan:
   DEBUG: false
   prompt_builder: "dynamic"
   enable_context_enhancement: true
-  max_num_signals_process: inf   # Maximum number of signals to process (inf = no limit)
-  max_prompts_per_signal: 3      # Maximum number of prompts per signal
+  max_num_signals_process: inf      # Maximum number of signals to process (inf = no limit)
+  max_prompts_per_signal: 3         # Maximum number of prompts per signal
   doc_retriever: true
-  chunk_size: 100                # Default doc retriever chunk size
-  overlap: 20                    # Overlap size for chunks
-  doc_k: 3                       # Number of document chunks to retrieve
-  kg_retriever: true             # Enable/disable KG retriever
-  use_KG: true                   # Use KG in retrieval
-  refine_with_rtl: true          # Refine retrieval with RTL signals
+  chunk_size: 100                   # Default doc retriever chunk size
+  overlap: 20                       # Overlap size for chunks
+  doc_k: 3                          # Number of document chunks to retrieve
+  kg_retriever: true                # Enable/disable KG retriever
+  use_KG: true                      # Use KG in retrieval
+  refine_with_rtl: true             # Refine retrieval with RTL signals
+  include_internal_signals: true   # If true, extract internal wires/regs/fsm states
+  hierarichal_signal_depth: 3       # Depth traversal for hierarichal signals when internal signals are enabled
+  prune_signals: true               # Clean and remove the redundant signals from the selected signals
   sva_file_path: null
   sva_out_dir: "/content/svas"
   gen_plan_sva_using_valid_signals: true
-  valid_signals: ["baud_clk", "baud_freq"]
+  valid_signals: []
   generate_SVAs: true
   load_dir: null
 
