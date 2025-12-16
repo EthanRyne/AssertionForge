@@ -112,6 +112,9 @@ class GenPlanStage:
     sva_out_dir: str = None
     gen_plan_sva_using_valid_signals: bool = True
     valid_signals: Optional[List[str]] = None
+    include_internal_signals: bool = False
+    hierarichal_signal_depth: int = 3
+    prune_signals: bool = True
     generate_SVAs: bool = False
     load_dir: Optional[str] = None
     dynamic_prompt_settings: DynamicPromptSettings = field(default_factory=DynamicPromptSettings)
@@ -179,6 +182,9 @@ class AppConfig:
             "sva_out_dir": self.gen_plan.sva_out_dir,
             "gen_plan_sva_using_valid_signals": self.gen_plan.gen_plan_sva_using_valid_signals,
             "valid_signals": self.gen_plan.valid_signals,
+            "include_internal_signals": self.gen_plan.include_internal_signals,
+            "hierarichal_signal_depth": self.gen_plan.hierarichal_signal_depth,
+            "prune_signals": self.gen_plan.prune_signals,
             "generate_SVAs": self.gen_plan.generate_SVAs,
             "load_dir": self.gen_plan.load_dir,
             # dynamic prompt internals → export as dict
