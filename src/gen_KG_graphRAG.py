@@ -60,6 +60,14 @@ def build_KG():
         print(f"Copied .env from {FLAGS.env_source_path} to {graph_rag_dir}")
         timer.time_and_clear(f'Updating .env file')
 
+        # New Step: Extract entity types from prompt and update settings.yaml
+        print("Step 3.5: Syncing entity types from extraction prompt")
+        update_settings_entity_types_from_prompt(
+            FLAGS.settings_source_path,
+            FLAGS.entity_extraction_prompt_source_path,
+        )
+        timer.time_and_clear("Syncing entity types from extraction prompt")
+
         # Step 4: Update settings.yaml file
         print("Step 4: Updating settings.yaml file")
         shutil.copy(
@@ -301,6 +309,52 @@ def create_directory_structure(base_dir):
     os.makedirs(input_dir, exist_ok=True)
     return graph_rag_dir
 
+def update_settings_entity_types_from_prompt(
+    settings_path: str,
+    entity_prompt_path: str,
+):
+    """
+    Extracts the first 'Entity Types: [...]' list from the entity extraction
+    prompt and updates ONLY extract_graph.entity_types in settings.yaml.
+    """
+
+    # --- Read entity extraction prompt ---
+    with open(entity_prompt_path, "r", encoding="utf-8") as f:
+        prompt_text = f.read()
+
+    # --- Extract Entity Types list ---
+    pattern = r'Entity\s+Types\s*:\s*\[(.*?)\]'
+    match = re.search(pattern, prompt_text, re.DOTALL)
+
+    if not match:
+        raise ValueError("No 'Entity Types' list found in entity extraction prompt")
+
+    raw_entities = match.group(1)
+
+    entity_types = [
+        e.strip().strip('"').strip("'")
+        for e in raw_entities.split(",")
+        if e.strip()
+    ]
+
+    # --- Load settings.yaml ---
+    with open(settings_path, "r", encoding="utf-8") as f:
+        settings = yaml.safe_load(f)
+
+    if "extract_graph" not in settings:
+        raise KeyError("settings.yaml missing 'extract_graph' section")
+
+    # --- Update ONLY extract_graph.entity_types ---
+    settings["extract_graph"]["entity_types"] = entity_types
+
+    # --- Write back settings.yaml ---
+    with open(settings_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(settings, f, sort_keys=False)
+
+    print(
+        f"Updated extract_graph.entity_types "
+        f"({len(entity_types)} entries)"
+    )
 
 def initialize_graphrag(graph_rag_dir):
     command = f"graphrag init --root {graph_rag_dir}"
@@ -327,8 +381,9 @@ def copy_entity_extraction_prompt(graph_rag_dir):
     graph_rag_dir (str): Path to the GraphRAG directory
     """
     source_path = FLAGS.entity_extraction_prompt_source_path
-    destination_path = os.path.join(graph_rag_dir, 'prompts', 'entity_extraction.txt')
-
+    filename = os.path.basename(source_path)
+    destination_path = os.path.join(graph_rag_dir, 'prompts', filename)
+    
     # Ensure the prompts directory exists
     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
 
