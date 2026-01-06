@@ -11,6 +11,7 @@ import subprocess
 import shutil
 import json
 import re
+import yaml
 from pathlib import Path
 import PyPDF2
 import logging, datetime
