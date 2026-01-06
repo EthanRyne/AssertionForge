@@ -140,7 +140,10 @@ def process_single_file(file_path, graph_rag_dir):
         print(f"JSONL Statistics: {num_pages} pages, {file_size:.2f} MB")
         return parse_jsonl_to_text(file_path, os.path.join(graph_rag_dir, 'input'))
     else:
-        num_pages, file_size, word_count, token_count = get_pdf_stats(file_path)
+        if file_path.lower().endswith('.docx'):
+            num_pages, file_size, word_count, token_count = get_docx_stats(file_path)
+        else:
+            num_pages, file_size, word_count, token_count = get_pdf_stats(file_path)
         print(f"PDF Statistics for {os.path.basename(file_path)}:")
         print(f"  Pages: {num_pages}")
         print(f"  File size: {file_size:.2f} MB")
@@ -188,6 +191,29 @@ def get_base_dir(file_path):
         return os.path.dirname(file_path)
     else:
         raise TypeError("Input must be a string or a list of strings.")
+
+def get_docx_stats(docx_path):
+    doc = Document(docx_path)
+
+    # DOCX does not have "pages" in a strict sense
+    num_pages = 0
+
+    file_size = os.path.getsize(docx_path) / (1024 * 1024)  # MB
+
+    full_text = ""
+    for para in doc.paragraphs:
+        if para.text:
+            full_text += para.text
+
+    word_count = len(re.findall(r'\w+',full_text))
+
+    # Count tokens using tiktoken
+    encoding = tiktoken.get_encoding(
+        "cl100k_base"
+    )  # Versatility: It supports multiple encoding schemes used by different OpenAI models (e.g., "cl100k_base" for GPT-4, "p50k_base" for GPT-3).
+    token_count = len(encoding.encode(full_text))
+    
+    return num_pages, file_size, word_count, token_count
 
 
 def get_pdf_stats(pdf_path):
