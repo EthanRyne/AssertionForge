@@ -15,6 +15,7 @@ import yaml
 from pathlib import Path
 import PyPDF2
 import logging, datetime
+from doxtract.processor import preprocess
 from utils import OurTimer, get_ts
 from saver import saver
 from config import FLAGS
@@ -220,16 +221,24 @@ def get_jsonl_stats(jsonl_path):
 
 
 def parse_pdf_to_text(pdf_path, output_dir):
-    design_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    ddesign_name = os.path.splitext(os.path.basename(pdf_path))[0]
     output_path = os.path.join(output_dir, f"{design_name}.txt")
-
+    output = preprocess(
+        [pdf_path],
+        markdown=True,
+        extract_vectors=False,
+        extract_images=False,
+        strip_headers_footers=True,
+        preserve_layout=True,
+        as_dataset=False,
+        verbose=False,
+    )
     with open(pdf_path, 'rb') as pdf_file, open(
         output_path, 'w', encoding='utf-8'
     ) as txt_file:
-        reader = PyPDF2.PdfReader(pdf_file)
-        for page in reader.pages:
-            txt_file.write(page.extract_text())
-
+        for page in output[list(output.keys())[0]]:
+            txt_file.write(page['page_content'])
+            
     return output_path
 
 
