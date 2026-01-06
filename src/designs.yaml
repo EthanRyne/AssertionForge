@@ -92,7 +92,7 @@ gen_plan:
 build_KG:
   env_source_path: "/content/AssertionForge/src/.env"
   settings_source_path: "/content/AssertionForge/src/settings.yaml"
-  entity_extraction_prompt_source_path: "/content/AssertionForge/entity_extraction.txt"
+  entity_extraction_prompt_source_path: "/content/AssertionForge/extract_graph.txt"
   graphrag_local_dir: "/<path>/<to>/graphrag"
 
 use_KG:
