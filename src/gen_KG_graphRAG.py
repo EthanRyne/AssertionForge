@@ -15,6 +15,7 @@ import yaml
 from pathlib import Path
 import PyPDF2
 import logging, datetime
+from docx import Document
 from doxtract.processor import preprocess
 from utils import OurTimer, get_ts
 from saver import saver
