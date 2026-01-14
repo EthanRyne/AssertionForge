@@ -13,7 +13,7 @@ models:
     api_key: ${GRAPHRAG_API_KEY} # set this in the generated .env file
     # audience: "https://cognitiveservices.azure.com/.default"
     # organization: <organization_id>
-    model: x-ai/grok-4-fast:free
+    model: mistralai/devstral-2512
     # deployment_name: <azure_model_deployment_name>
     encoding_model: cl100k_base # automatically set by tiktoken if left undefined
     model_supports_json: true # recommended if this is available for your model.
@@ -25,13 +25,13 @@ models:
     requests_per_minute: auto            # set to null to disable rate limiting
   default_embedding_model:
     type: openai_embedding # or azure_openai_embedding
-    api_base: http://localhost:11434/v1/
+    api_base: https://openrouter.ai/api/v1
     # api_version: 2024-05-01-preview
     auth_type: api_key # or azure_managed_identity
-    api_key: ollama
+    api_key: ${GRAPHRAG_API_KEY}
     # audience: "https://cognitiveservices.azure.com/.default"
     # organization: <organization_id>
-    model: embeddinggemma
+    model: openai/text-embedding-3-small
     # deployment_name: <azure_model_deployment_name>
     encoding_model: cl100k_base # automatically set by tiktoken if left undefined
     model_supports_json: true # recommended if this is available for your model.
