@@ -248,7 +248,7 @@ def get_jsonl_stats(jsonl_path):
 
 
 def parse_pdf_to_text(pdf_path, output_dir):
-    ddesign_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    design_name = os.path.splitext(os.path.basename(pdf_path))[0]
     output_path = os.path.join(output_dir, f"{design_name}.txt")
     output = preprocess(
         [pdf_path],
