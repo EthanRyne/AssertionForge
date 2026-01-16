@@ -452,7 +452,7 @@ def generate_dynamic_nl_plans(
         # Get dynamic contexts with enhancement integrated if enabled
         dynamic_context_list = prompt_builder.build_prompt(
             query=query,
-            base_prompt="",
+            base_prompt="Generate SystemVerilog Assertions based on the following information:",
             signal_name=signal_name,
             enable_context_enhancement=FLAGS.enable_context_enhancement,  # Pass the enhancement flag
         )
